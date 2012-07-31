@@ -1,0 +1,16 @@
+
+div#appDiv {
+	width: 100%;
+}
+
+div#canvasDiv {
+	float: left;
+	width: 800px;
+	background-color: white;
+}
+
+div#controlsDiv {
+	float: right;
+	margin: 50px;
+	background-color: white;
+}
