@@ -3,7 +3,7 @@
  * @namespace cog1
  * @module app
  */
-define(["exports", "ui", "scene"], function(exports, ui, scene) {
+define(["exports", "layout", "ui", "scene"], function(exports, layout, ui, scene) {
 	// Animation loop is running and scene is rendered continuously.
 	var running = false;
 	// Start date of the last animation loop frame.
@@ -11,37 +11,41 @@ define(["exports", "ui", "scene"], function(exports, ui, scene) {
 	// Time between calls to animation loop in milliseconds.
 	var timeSinceLastFrame = 0;
 	// The initialization process must finish before we can start the rendering loop.
+	// But it should also not be called two times, thus to be sure.
 	var initDone = false;
 
 	/**
 	 * This is the entry point.
-	 * Load all external modules,
-	 * then initialize own modules,
-	 * then start to rendering an animation loop.
+	 * Load all external resources,
+	 * then initialize own modules.
+	 * Optionally create or augment the HTML-page.
+	 * Finally start to rendering an animation loop.
 	 */
 	function load() {
 		// Load external resources then proceed with init.
-		// In glMatrix vectors are columns. 
-		// Thus OpenGL-Matrices have to be transposed. 
-		// require(["cog1/ext/glMatrix.js"], init);
+		//require(["cog1/ext/glMatrix.js","cog1/exercise.js"], init(createSceneFkt););
+		//require(["cog1/ext/glMatrix.js"], function() { init(createSceneFkt); });
 		init();
 	}
 
+
 	/**
 	 * Initialize all modules from here.
+	 * @ parameter createSceneFkt is executed from scenegraph.
 	 */
 	function init() {
-//		console.log("cog1.app.init()");
+		//console.log("app.init()");
 		if(initDone) {
-//			console.log(".... already done.");
+			//console.log("init already done.");
 			return;
+		} else {
+			initDone = true;
 		}
 
+		// Init HTML layout and from there the GUI/UI with interaction.
+		layout.init();
 		scene.init();
-		ui.init();
-
-		initDone = true;
-
+		//ui.init();
 		// Proceed directly to startup of the loop.
 		//start();
 	}
@@ -52,15 +56,16 @@ define(["exports", "ui", "scene"], function(exports, ui, scene) {
 	 * @ returns true if loop has been started.
 	 */
 	function start(_running) {
-//		console.log("cog1.app.start()");
+		//console.log("cog1.app.start()");
 
 		if(!initDone) {
 			init();
 		}
 		if(running) {
-//			console.log("Animation loop is already running.");
+			//console.log("Animation loop is already running.");
 			return;
 		}
+		// Run per default if no parameter is given.
 		if( typeof _running != "boolean") {
 			running = true;
 		} else {
@@ -86,7 +91,6 @@ define(["exports", "ui", "scene"], function(exports, ui, scene) {
 		function(/* function */callback, /* DOMElement */element) {
 			window.setTimeout(callback, 1000 / 60);
 		};
-
 	})();
 
 	/*
@@ -103,15 +107,18 @@ define(["exports", "ui", "scene"], function(exports, ui, scene) {
 		var curDate = Date.now();
 		timeSinceLastFrame = curDate - startDate;
 		startDate = curDate;
-//		console.log("animLoop " + timeSinceLastFrame);
+		//console.log("animLoop " + timeSinceLastFrame);
 		// Render. Scene return when it is up to date.
 		var sceneIsUpToDate = scene.render();
 		// Restart render loop.
 		if(! sceneIsUpToDate || running) {
 			requestAnimFrame(animLoop);
 		} else {
+			// The scene is up-to-date.
+			// Update the GUI.
+			ui.update();
 			running = false;
-//			console.log("animLoop stoped running");			
+			//console.log("animLoop stoped running");			
 		}
 	}
 

@@ -4,9 +4,14 @@
  * @namespace cog1
  * @module scene
  */
-define(["exports", "dojo", "app", "scenegraph", "raster", "framebuffer", "data", "glMatrix"], function(exports, dojo, app, scenegraph, raster, framebuffer, data) {
+define(["exports", "dojo", "dojo/dom-style", "app", "scenegraph", "createScene", "raster", "shader", "framebuffer", "data", "glMatrix"], function(exports, dojo, domStyle, app, scenegraph, createScene, raster, shader, framebuffer, data) {
 
-	// Keep the canvas to access parameters.
+	// Name of the shading function used for all nodes
+	// (noShading, flat, gouraud, phong, etc)
+	var shadingFunctionName = "flat";
+	//"noShading";
+
+	// Keep the canvas to access context and parameters.
 	var canvas = null;
 	// Drawing context for canvas.
 	var ctx;
@@ -16,6 +21,9 @@ define(["exports", "dojo", "app", "scenegraph", "raster", "framebuffer", "data",
 	// no animations are running.
 	var upToDate = false;
 
+	// In glMatrix vectors are columns.
+	// Thus OpenGL-Matrices have to be transposed.
+	//
 	// There is one projection matrix for the scene.
 	var projection = mat4.identity(mat4.create());
 	// Viewport transformation matrix.
@@ -25,7 +33,7 @@ define(["exports", "dojo", "app", "scenegraph", "raster", "framebuffer", "data",
 	// Combined matrix for faster calculation.
 	var worldModelviewViewportProjection = mat4.create();
 
-	// Font.
+	// Font for info on canvas (not in GUI) .
 	var fontsizeInPt = 10;
 	var font = fontsizeInPt + "pt Helvetica normal";
 	var fontLineHeightInPt = Math.ceil(fontsizeInPt * 1.5);
@@ -33,6 +41,15 @@ define(["exports", "dojo", "app", "scenegraph", "raster", "framebuffer", "data",
 	var defaultColor = "black";
 	var defaultTextColor = "grey";
 
+	// If triangulation should be performed on the data on init.
+	var triangulateDataOnInit = false;
+	var dataIsTriangulated = triangulateDataOnInit;
+	// Fill or stroke polygon.
+	var fill = true;
+	// Display normals for debug.
+	var displayNormals = false;
+	// Display the z-buffer instead of the frame-buffer.
+	var debug_zBuffer = false;
 
 	/**
 	 * Initialize the scene, i.e., canvas, graphics-context, projection.
@@ -40,23 +57,24 @@ define(["exports", "dojo", "app", "scenegraph", "raster", "framebuffer", "data",
 	 * have to pass an index and maybe a enclosing div element.
 	 */
 	function init() {
-//		console.log("cog1.scene.init()");
-//		console.log(this);
+		//console.log("scene.init()");
 		// Check if there is already a canvas in the scene.
 		canvas = dojo.query("canvas")[0];
 		if(!dojo.isObject(canvas)) {
-			// Create a canvas for the scene.
-			canvas = dojo.create("canvas", {
-				id : "canvas",
-				width : "800",
-				height : "500",
-				className : "canvas"
-			}, dojo.body(), "first");
+			console.error("Scene: No canvas found.")
+			return;
 		}
 		// Get the drawing context.
 		if(canvas.getContext) {
 			ctx = canvas.getContext("2d");
 		}
+		// Get background-color from canvas to pass to the framebuffer.
+		var bgColorStyle = domStyle.get(canvas, "backgroundColor");
+		//console.log("background-color: "+bgColorStyle);
+		rgb = bgColorStyle.match(/rgb\((\d+),\s(\d+),\s(\d+)\)/);
+		var bgColor = rgb.slice(1, 4);
+		//console.log(rgb);
+		//console.log(bgColor);
 		// Also store dimension of the canvas in the context,
 		// to pass them all together as parameter.
 		ctx.width = canvas.width;
@@ -67,30 +85,34 @@ define(["exports", "dojo", "app", "scenegraph", "raster", "framebuffer", "data",
 		ctx.font = font;
 		ctx.textAlign = "left";
 
-		raster.init(ctx);
-
 		// Initialize an calculate matrices that do not chance.
 		setProjection();
 		setViewport();
 		calcviewportProjection();
-		scenegraph.init();
+
+		raster.init(ctx, bgColor);
+		scenegraph.init(triangulateDataOnInit);
+		// Create the scene.
+		createScene.init();
+		shader.init();		
 	}
-	
-	/*
-	 * When nodes are modified, they report to the scene
-	 * that it needs rerendering.
+
+	/**
+	 * When nodes are modified or some other interaction occured,
+	 * the scene needs re-rendering.
+	 * Tell the app to restart the render loop, which calls the scene in turn.
 	 */
-	function setUpToDate(val){
+	function setUpToDate(val) {
 		upToDate = val;
 		// Tell app to run the loop.
-		if(! upToDate){
+		if(!upToDate) {
 			app.start(false);
 		}
 	}
 
 	/**
 	 * Set a default for the projection matrix.
-	 * As a result all vertices inside the frustrum
+	 * As a result all vertices inside the frustum
 	 * should be in a -1,+1 cube (clip cooordinates).
 	 * This may be overwritten.
 	 * If you do not do anything here, result will be
@@ -101,12 +123,12 @@ define(["exports", "dojo", "app", "scenegraph", "raster", "framebuffer", "data",
 		if(matrix) {
 			mat4.set(matrix, projection);
 		} else {
-			// Set frustrum to +- size of the canvas.
+			// Set frustum to +- size of the canvas.
 			var r = ctx.width;
 			var t = ctx.height;
 			// glMatrix has a bug. Set near to far to cancel the wrong transform in glMatrix.
 			// mat4.ortho(-r, r, -t, t, 2, 0, projection);
-			// Assume an ortho projection with a symetric frustrum.
+			// Assume an orthogonal projection with a symmetric frustum.
 			// Projection should be the unity matrix at this point.
 			// See  mat4.multiplyVec4 for indices.
 			projection[0] = 1.0 / r;
@@ -124,8 +146,8 @@ define(["exports", "dojo", "app", "scenegraph", "raster", "framebuffer", "data",
 	 * If you do not do anything here, result will be no transformation.
 	 */
 	function setViewport() {
-		// Center the scene and scale frustrum to the canvas.
-		// See  mat4.multiplyVec4 for indeces.
+		// Center the scene and scale frustum to the canvas.
+		// See  mat4.multiplyVec4 for indices.
 		var w = ctx.width;
 		var h = ctx.height;
 		var w2 = w / 2.0;
@@ -153,12 +175,15 @@ define(["exports", "dojo", "app", "scenegraph", "raster", "framebuffer", "data",
 		}
 
 		framebuffer.reset();
-		// Clear the canvas from debug info and from the 
+		// Clear the canvas from debug info and from the
 		// remains of the last (maybe larger) dirty rectangle.
-		ctx.clearRect(0,0,ctx.width, ctx.height);
+		ctx.clearRect(0, 0, ctx.width, ctx.height);
 
 		// Assume all is ready for rendering.
 		upToDate = true;
+
+		// Set one shading function for all nodes/models.
+		shader.setShadingFunction(shadingFunctionName);
 
 		// A shortcut to the nodes.
 		var nodes = scenegraph.getNodes();
@@ -166,20 +191,20 @@ define(["exports", "dojo", "app", "scenegraph", "raster", "framebuffer", "data",
 		// Display matrices that are common for all nodes.
 		displayViewProjectionMatrices();
 
-//		console.log("cog1.scene.render() notes:" + nodes.length);
+		//console.log("scene.render() notes:" + nodes.length);
 		// Loop over all nodes in the scene.
 		// Leave out nodes if they are not ready yet
 		// and report that.
 		for(var i = 0; i < nodes.length; i++) {
-//			console.log(nodes[i]);
-//			console.log(nodes[i].getModel());
+			//console.log(nodes[i]);
+			//console.log(nodes[i].getModel());
 			// Verify that node is ready.
 			if(!nodes[i].isReady()) {
 				upToDate = false;
-//				console.log("note not ready:" + i);
+				//console.log("note not ready:" + i);
 				continue;
 			}
-//			console.log("nodes[" + i + "] is ready");
+			//console.log("nodes[" + i + "] is ready");
 			// Render the node.
 			// Perform modelview, projection and viewport transformations in 3D.
 			var worldModelview = nodes[i].updateModelview();
@@ -187,55 +212,136 @@ define(["exports", "dojo", "app", "scenegraph", "raster", "framebuffer", "data",
 			mat4.multiply(viewportProjection, worldModelview, worldModelviewViewportProjection);
 			// Display for debug.
 			displayModelViewMatrix(i, worldModelview, nodes[i].getLocalModelview());
-			// Apply the combined matrix to the node.
+
+			// Apply the worldModelview matrix to the node.
 			// The result is stored in the transformedVertices of node.model.
-			nodes[i].applyMatrix(worldModelviewViewportProjection);
-			// Check if the node contains a model.
-			var modelData = nodes[i].getModelData();
-			if(modelData !== null) {
-				var transformedVertices = nodes[i].getTransformedVertices();
-				if(transformedVertices === null) {
-//					console.error("scene.render: transformedVertices === null");
-				}
-				// Raster the 2D polygons of the node.
-				rasterization(modelData, transformedVertices);
+			nodes[i].applyMatrixToVertices(worldModelview);
+			//nodes[i].applyMatrixToVertices(worldModelviewViewportProjection);
+
+			// Transform, i.e. only rotate, normals for shading.
+			var worldRotation = nodes[i].updateRotation();
+			nodes[i].applyMatrixToNormals(worldRotation);
+
+			// Display normals for debug.
+			if(displayNormals) {
+				renderModelNormals(nodes[i].getModel());
 			}
+
+			// Apply the viewportProjection matrix to the node.
+			// The result is stored in the transformedVertices of node.model.
+			nodes[i].applyMatrixToTransformedVertices(viewportProjection);
+
+			// Raster the 2D polygons of the node.
+			renderModel(nodes[i].getModel());
 		}
-
 		framebuffer.display();
-
 		return upToDate;
 	}
 
 	/**
-	 * Rasterization step.
+	 * Rasterization, interpolation and shading.
+	 * Do the work (among other) of the fragment shader.
 	 */
-	function rasterization(modelData, transformedVertices) {
+	function renderModel(model) {
+		var modelData = model.getData();
+		var vertices = model.getTransformedVertices();
 		var polygons = modelData.polygonVertices;
-		var vertices = transformedVertices;
+
+		// Register the current model with the shader.
+		shader.setModel(model);
+
 		// Loop over polygons in model.
 		for(var p = 0; p < polygons.length; p++) {
+
 			var polygon = polygons[p];
 			var color = modelData.colors[modelData.polygonColors[p]];
-			// Fill or stroke polygon.
-			var fill = true;
-			raster.scanlineDrawPolygon(ctx, transformedVertices, polygon, color, fill);
+
+			// Register the current polygon with the shader,
+			// combined with back-face culling.
+			if(!fill || shader.setPolygon(p)) {
+				raster.scanlineDrawPolygon(ctx, vertices, polygon, color, fill);
+			}
+			
 			// Stroke polygon on top to see black edges
 			// (and to cover up (a bit) for edge fighting).
 			var colorBlack = data.colors[6];
-			if(fill) {
-				//raster.scanlineDrawPolygon(ctx, transformedVertices, polygon, colorBlack, false);
+			if(fill && displayNormals) {
+				raster.scanlineDrawPolygon(ctx, vertices, polygon, colorBlack, false);
 			}
 		}
+	}
+
+	/**
+	 * Create some debug geometry for the normals on the fly
+	 * and apply view-port transformation and projection and rasterization to it.
+	 */
+	function renderModelNormals(model) {
+		var modelData = model.getData();
+		var vertices = model.getTransformedVertices();
+		var polygons = modelData.polygonVertices;
+		var vertexNormals = model.getTransformedVertexNormals();
+		var polygonNormals = model.getTransformedPolygonNormals();
+
+		var polygonCenter;
+		// Loop over polygons in model.
+		for(var p = 0; p < polygons.length; p++) {
+			var polygon = polygons[p];
+
+			// The average of all vertices as debug geometry for the normals.
+			polygonCenter = [0, 0, 0];
+
+			// Loop over vertices/edges in polygon.
+			for(var v = 0; v < polygon.length; v++) {
+
+				// Draw normal for vertex.
+				var vertexIndex = polygon[v];
+				renderNormal(vertices[vertexIndex], vertexNormals[vertexIndex]);
+
+				// Accumulate vertices to calculate center of polygon.
+				vec3.add(polygonCenter, vertices[vertexIndex]);
+			}
+
+			vec3.scale(polygonCenter, (1 / polygon.length));
+
+			// Draw normal for polygon beginning in the averaged center.
+			renderNormal(polygonCenter, polygonNormals[p]);
+		}
+	}
+
+	/*
+	 * Renders a normal as a line taking care of projection
+	 * and view-port and scaling it.
+	 */
+	function renderNormal(_startPoint, normal, scale) {
+
+		if(scale == undefined) {
+			scale = 50.0;
+		};
+
+		var colorBlack = data.colors[6];
+
+		var startPoint = vec3.create();
+		vec3.set(_startPoint, startPoint);
+		var endPoint = vec3.create();
+		var scaledNormal = vec3.create();
+		vec3.scale(normal, scale, scaledNormal);
+
+		vec3.add(startPoint, scaledNormal, endPoint);
+
+		mat4.multiplyVec3(viewportProjection, startPoint);
+		mat4.multiplyVec3(viewportProjection, endPoint);
+
+		raster.calcPlaneEquationForStraightLine(startPoint, normal);
+		raster.drawLineBresenhamGivenStartEndPoint(ctx, startPoint, endPoint, colorBlack, false);
 	}
 
 	/**
 	 * Display Projection and View-port matrices.
 	 */
 	function displayViewProjectionMatrices() {
-		displayMatrix("Projection", projection, 0, 100);
-		displayMatrix("Viewport", viewport, 0, 200);
-		displayMatrix("Projection-Viewport", viewportProjection, 0, 300);
+		displayMatrix("Projection", projection, 10, 100);
+		displayMatrix("Viewport", viewport, 10, 200);
+		displayMatrix("Projection-Viewport", viewportProjection, 10, 300);
 	}
 
 	function displayModelViewMatrix(nodeIndex, worldModelview, localModelview) {
@@ -269,9 +375,79 @@ define(["exports", "dojo", "app", "scenegraph", "raster", "framebuffer", "data",
 		ctx.fillStyle = defaultColor;
 	}
 
+	//////////////////////////////////////////
+	//////// UI Interface functions
+	//////////////////////////////////////////
+
+	function toggleFill() {
+		fill = !fill;
+		setUpToDate(false);
+	}
+
+	function toggleDebugZBuffer() {
+		debug_zBuffer = !debug_zBuffer;
+		setUpToDate(false);
+	}
+
+	function toggleDebugNormals() {
+		displayNormals = !displayNormals;
+		setUpToDate(false);
+	}
+
+	/*
+	 * Switch between original data and triangulation result.
+	 */
+	function toggleTriangulation() {
+		scenegraph.toggleTriangulation();
+		dataIsTriangulated = ! dataIsTriangulated; 
+		setUpToDate(false);
+	}
+
+	//////////////////////////////////////////
+	//////// getter/setter functions for UI
+	//////////////////////////////////////////
+
+	function getFill() {
+		return fill;
+	}
+
+	function getDisplayNormals() {
+		return displayNormals;
+	}
+
+	function getDataIsTriangulated() {
+		return dataIsTriangulated;
+	}
+
+	function getDebug_zBuffer() {
+		return debug_zBuffer;
+	}
+
+	function getShadingFunctionName() {
+		return shadingFunctionName;
+	}
+
+	function setShadingFunctionName(name) {
+		shadingFunctionName = name;
+		shader.setShadingFunction(shadingFunctionName);
+	}
+
 	// Public API.
 	exports.init = init;
 	exports.setProjection = setProjection;
 	exports.render = render;
 	exports.setUpToDate = setUpToDate;
+	// GUI switches. 
+	exports.toggleFill = toggleFill;
+	exports.toggleDebugNormals = toggleDebugNormals;
+	exports.toggleTriangulation = toggleTriangulation;
+	exports.toggleDebugZBuffer = toggleDebugZBuffer;
+	// Public getter/setter for variables.
+	exports.getFill = getFill;
+	exports.getDisplayNormals = getDisplayNormals;
+	exports.getDataIsTriangulated = getDataIsTriangulated;
+	exports.getDebug_zBuffer = getDebug_zBuffer;
+	exports.getShadingFunctionName = getShadingFunctionName;
+	exports.setShadingFunctionName = setShadingFunctionName;
+
 });

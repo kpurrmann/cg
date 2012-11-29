@@ -3,65 +3,7 @@
  * transform, i.e. translate, rotate, scale vectors for a node in the scene.
  * It can have a parent node.
  */
-define(["exports", "dojo", "scene", "glMatrix"], function(exports, dojo, scene) {
-
-	// The UI finds nodes by name.
-	var name = "";
-	// 3D-Model, if null the node may only serve as an empty group.
-	var model = null;
-	// Parent node.
-	var parent = null;
-	// List of children /child nodes.
-	var children = [];
-
-	// Local transformations (translation, rotation, scale)
-	// for the model or group.
-	var transformation = {
-		translate : [0,0,0],
-		rotate : [1,1,1], // around x,y,z axis angle in radians
-		scale : [1,1,1]
-	};
-	// Modelview matrix as 4x4 glMatrix to
-	// Transform, i.e. translate, rotate, scale the node.
-	// Local Modelview not including the transformations of the parents.
-	var localModelview = mat4.create();
-	// World coordinates, including transformation of parents.
-	var worldModelview = mat4.create();
-	// Track changes via transformations and update only when necessary.
-	var localModelviewUpToDate = false;
-	var worldModelviewUpToDate = false;
-
-	function getLocalModelview() {
-		updateModelview();
-		return localModelview;
-	}
-
-	function getWorldModelview() {
-		updateModelview();
-		return worldModelview;
-	}
-
-	function getModel() {
-		return model;
-	}
-
-	function getModelData() {
-		if(model === null) {
-			return null;
-		}
-		return model.getData();
-	}
-
-	function getTransformedVertices() {
-		if(model === null) {
-			return null;
-		}
-		return model.getTransformedVertices();
-	}
-
-	function setWorldModelviewNotUpToDate() {
-		worldModelviewUpToDate = false;
-	}
+define(["exports", "dojo", "scene"], function(exports, dojo, scene) {
 
 	/**
 	 * Create a node and return an interface object to it.
@@ -69,51 +11,111 @@ define(["exports", "dojo", "scene", "glMatrix"], function(exports, dojo, scene) 
 	 * @ returns node.
 	 */
 	function create(_name, _model, _parent) {
-//		console.log("cog1.node.create:" + _model);
-		if(_name !== undefined) {
-			name = _name;
+		//console.log("cog1.node.create:" + _model);
+		if( ! _name  || ! _model ) {
+			console.log("Error node.create no name or model");
+			return;
 		}
-		if(_model !== undefined) {
-			model = _model;
-		}
-		if(_parent !== undefined) {
-			parent = _parent;
-		}
-		var newNode = {
-			name : name,
+		var newNodeObj = {
+			//
+			// Fields for each object instance.
+			//
+			// The UI finds nodes by name.
+			name : _name,
+			// 3D-Model, if null the node may only serve as an empty group.
+			model : _model,
+			// Parent node, should not be undefined but null if not set.
+			parent : _parent || null,
+			// List of children /child nodes.
+			children : [],
+
+			// Local transformations (translation, rotation, scale)
+			// for the model or group.
+			transformation : {
+				translate : [0, 0, 0],
+				rotate : [0, 0, 0], // around x,y,z axis angle in radians
+				scale : [1, 1, 1]
+			},
+			// Modelview matrix as 4x4 glMatrix to
+			// Transform, i.e. translate, rotate, scale the node.
+			// Local Modelview not including the transformations of the parents.
+			localModelview : mat4.create(),
+			// World coordinates, including transformation of parents.
+			worldModelview : mat4.create(),
+			// Track changes via transformations and update only when necessary.
+			localModelviewUpToDate : false,
+			worldModelviewUpToDate : false,
+			// Separate rotation-matrix for normals.
+			localRotation : mat4.create(),
+			worldRotation : mat4.create(),
+			//
+			// Public functions.
+			//
 			addChild : addChild,
-			tellChildren : tellChildren,
-			isReady : isReady,
+			applyMatrixToVertices : applyMatrixToVertices,
+			applyMatrixToTransformedVertices : applyMatrixToTransformedVertices,
+			applyMatrixToNormals : applyMatrixToNormals,
 			getLocalModelview : getLocalModelview,
 			getWorldModelview : getWorldModelview,
-			updateModelview : updateModelview,
 			getModel : getModel,
 			getModelData : getModelData,
-			getTransformedVertices : getTransformedVertices,
-			getLocalModelview : getLocalModelview,
-			getWorldModelview : getWorldModelview,
-			applyMatrix : applyMatrix,
-			translate : translate,
+			isReady : isReady,
 			rotate : rotate,
 			scale : scale,
+			setWorldModelviewNotUpToDate : setWorldModelviewNotUpToDate,
+			tellChildren : tellChildren,
+			toggleTriangulation : toggleTriangulation,
+			transform : transform,
+			translate : translate,
+			updateModelview : updateModelview,
+			updateRotation : updateRotation,
 		};
 		// Register as child;
-		if(parent) {
-			parent.addChild(newNode);
+		if(_parent) {
+			_parent.addChild(newNodeObj);
 		}
 		// Return access object to the node.
-		return newNode;
+		return newNodeObj;
+	}
+
+	function getLocalModelview() {
+		this.updateModelview();
+		return this.localModelview;
+	}
+
+	function getWorldModelview() {
+		this.updateModelview();
+		return this.worldModelview;
+	}
+
+	function getModel() {
+		return this.model;
+	}
+
+	function getModelData() {
+		if(this.model === null) {
+			return null;
+		}
+		return this.model.getData();
+	}
+
+	function setWorldModelviewNotUpToDate() {
+		this.worldModelviewUpToDate = false;
 	}
 
 	function addChild(node) {
-		children.push(node);
+		this.children.push(node);
 	}
 
-	function tellChildren(fkt) {
+	/**
+	 * Tell node an children to call a given update function.
+	 *  @parameter fktName is a name of a function in this given as string.
+	 */
+	function tellChildren(fktName) {
 		// First tell myself.
-		fkt();
-		for(var i = 0; i < children.length; i++) {
-			children[i][fkt]();
+		this[fktName]();
+		for(var i = 0; i < this.children.length; i++) {
+			this.children[i][fktName]();
 		};
 	}
 
@@ -122,9 +124,12 @@ define(["exports", "dojo", "scene", "glMatrix"], function(exports, dojo, scene) 
 	 * @returns true if model is ready for rendering
 	 */
 	function isReady() {
-		var ready = true;
-		if(model !== null) {
-			ready = ready && model.isReady();
+		var ready = false;
+		if(this.model !== null) {
+			ready = this.model.isReady();
+		} else {
+			// The model may not have finished loading.
+			//console.log("this.node.isReady: this.model==null");
 		}
 		return ready;
 	}
@@ -136,80 +141,127 @@ define(["exports", "dojo", "scene", "glMatrix"], function(exports, dojo, scene) 
 	 * This is due to optimization as calculations
 	 * are performed more than once in each frame.
 	 *
+	 * Update the rotation matrices for the rotation as well.
+	 *
 	 * @ returns worldModelview Matrix
 	 */
 	function updateModelview() {
 		// update LocalModelview() {
-		if(! localModelviewUpToDate) {
+		if(!this.localModelviewUpToDate) {
 			// Calculate local modelview.
-			mat4.identity(localModelview);
-			mat4.translate(localModelview, transformation.translate);
-			mat4.rotateX(localModelview, transformation.rotate[0]);
-			mat4.rotateY(localModelview, transformation.rotate[1]);
-			mat4.rotateZ(localModelview, transformation.rotate[2]);
-			mat4.scale(localModelview, transformation.scale);
+			mat4.identity(this.localModelview);
+			// Translate last, thus include it first.
+			mat4.translate(this.localModelview, this.transformation.translate);
+			// Calculate and store the rotation separately for the normals.
+			mat4.identity(this.localRotation);
+			mat4.rotateX(this.localRotation, this.transformation.rotate[0]);
+			mat4.rotateY(this.localRotation, this.transformation.rotate[1]);
+			mat4.rotateZ(this.localRotation, this.transformation.rotate[2]);
+			// Include rotation.
+			mat4.multiply(this.localModelview, this.localRotation, this.localModelview);
+			// Include scaling.
+			mat4.scale(this.localModelview, this.transformation.scale);
 			// Locally we are up to date, but we have to adjust world MV.
-			localModelviewUpToDate = true;
-			worldModelviewUpToDate = false;
+			this.localModelviewUpToDate = true;
+			this.worldModelviewUpToDate = false;
 		}
-		// update WorldModelview
-		if(! worldModelviewUpToDate) {
-			 mat4.identity(worldModelview);
+		// Update WorldModelview and worldRotation.
+		if(!this.worldModelviewUpToDate) {
+			mat4.identity(this.worldModelview);
+			mat4.identity(this.worldRotation);
 			// Include transformation of parent node.
-			if(parent !== null) {
-				pwmv = parent.updateModelview();
-				mat4.multiply(worldModelview, pwmv, worldModelview);
+			if(this.parent !== null) {
+				var PWMV = parent.updateModelview();
+				var PWR = parent.updateRotation();
+				mat4.multiply(this.worldModelview, PWMV, this.worldModelview);
+				mat4.multiply(this.worldRotation, PWR, this.worldRotation);
 			}
 			// Combine world of parents with local to this world.
-			mat4.multiply(worldModelview, localModelview, worldModelview);
-			worldModelviewUpToDate = true;
+			mat4.multiply(this.worldModelview, this.localModelview, this.worldModelview);
+			mat4.multiply(this.worldRotation, this.localRotation, this.worldRotation);
+			this.worldModelviewUpToDate = true;
 		}
-		return worldModelview;
+		return this.worldModelview;
+	}
+
+	/*
+	 * @return world rotation matrix.
+	 */
+	function updateRotation() {
+		this.updateModelview();
+		return this.worldRotation;
 	}
 
 	/**
 	 * @parameter delta to add to the current translation.
 	 */
 	function translate(vec) {
-		transform(transformation.translate, vec);
+		this.transform(this.transformation.translate, vec);
 	}
 
 	/**
 	 * @parameter delta to add to the current rotation.
 	 */
 	function rotate(vec) {
-		transform(transformation.rotate, vec);
+		this.transform(this.transformation.rotate, vec);
 	}
 
 	/**
 	 * @parameter delta to add to the current scale.
 	 */
 	function scale(vec) {
-		transform(transformation.scale, vec);
+		this.transform(this.transformation.scale, vec);
 	}
 
 	/**
-	 * @parameter delta to add to the current translation.
+	 * @parameter vec delta to add to the current transformation, given as trans.
 	 */
 	function transform(trans, vec) {
-//		console.log("transform name: " + name);
-		localModelviewUpToDate = false;
-		worldModelviewUpToDate = false;
+		//console.log("transform name: " + name);
+		this.localModelviewUpToDate = false;
+		this.worldModelviewUpToDate = false;
 		vec3.add(trans, vec, null);
 		// Tell children the world of their parents has changed.
-		tellChildren(setWorldModelviewNotUpToDate);
+		this.tellChildren("setWorldModelviewNotUpToDate");
 		scene.setUpToDate(false);
-		//updateModelview() is called from render function.
+		//this.updateModelview() is called from render function.
 	}
 
 	/**
 	 * Apply a matrix to vertices if node contains a model.
 	 * @parameter mat mat4 matrix
 	 */
-	function applyMatrix(matrix) {
-		// Project the model.
-		if(model !== null) {
-			model.applyMatrix(matrix);
+	function applyMatrixToVertices(matrix) {
+		// Transform the model.
+		if(this.model !== null) {
+			this.model.applyMatrixToVertices(matrix);
+		}
+	}
+
+	/**
+	 * Apply a matrix to transformed vertices if node contains a model.
+	 * @parameter mat mat4 matrix
+	 */
+	function applyMatrixToTransformedVertices(matrix) {
+		// Transform the model.
+		if(this.model !== null) {
+			this.model.applyMatrixToTransformedVertices(matrix);
+		}
+	}
+
+	/**
+	 * Apply a matrix to normals if node contains a model.
+	 * @parameter mat mat4 matrix
+	 */
+	function applyMatrixToNormals(matrix) {
+		if(this.model !== null) {
+			this.model.applyMatrixToNormals(matrix);
+		}
+	}
+
+	function toggleTriangulation() {
+		if(this.model !== null) {
+			this.model.toggleTriangulation();
 		}
 	}
 
