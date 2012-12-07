@@ -87,7 +87,7 @@ define(["exports", "dojo", "shader", "framebuffer", "data", "glMatrix"], functio
                     err += dXdYdiff2;
                     addIntersection(x, y);
                 }
-                framebuffer.set(x, y, 0, color);
+                framebuffer.set(x, y, getZ(x,y), color);
             }
         } else {
             err = dYAbs - dXAbs2;
@@ -99,7 +99,7 @@ define(["exports", "dojo", "shader", "framebuffer", "data", "glMatrix"], functio
                     x += dXSign;
                     err += dYdXdiff2;
                 }
-                framebuffer.set(x, y, 0, color);
+                framebuffer.set(x, y, getZ(x,y), color);
                 addIntersection(x, y);
             }
         }
