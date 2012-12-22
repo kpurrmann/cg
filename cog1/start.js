@@ -36,7 +36,7 @@ require(["dojo", "dojo/parser", "dojo/domReady!"], function(dojo) {
 		paths : {
 			// Absolute path to cog1 project, local directory without
 			// HTTP-server:
-			"cog1" : "E:/PROGRAMMIERUNG/OTHERS/Rendering_Pipeline/cog1"
+			"cog1" : "http://www.vme-berlin.de/computergrafik/cog1"
 			//"cog1" : "/Users/felixgers/BHT/src/cog1/cog1_JS_sol/cog1"
 			// "cog1" : "U:/BHT/src/cog1/cog1_JS_sol"
 			// On same [local] HTTP-server as used to load dojo:

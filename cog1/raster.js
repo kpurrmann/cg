@@ -52,63 +52,58 @@ define(["exports", "dojo", "shader", "framebuffer", "data", "glMatrix"], functio
 	 * @ parameter storeIntersectionForScanlineFill: if false edges are only calculated
 	 * @ to be filled with scanline but not drawn.
 	 */
-    var i=0;
     function drawLineBresenham(ctx, startX, startY, endX, endY, color, storeIntersectionForScanlineFill) {
 
+        var x = startX;
+        var y = startY;
+
+        // Abstand
         var dX = endX - startX;
         var dY = endY - startY;
+
+        // Beträge
         var dXAbs = Math.abs(dX);
         var dYAbs = Math.abs(dY);
-        var dXSign = dX >= 0 ? 1 : -1;
-        var dYSign = dY >= 0 ? 1 : -1;
+
+        // Start kleiner als Ende
+        var dXSign = (dX > 0) ? 1 : -1;
+        var dYSign = (dY > 0) ? 1 : -1;
 
         // shortcuts for speedup.
         var dXAbs2 = 2 * dXAbs;
         var dYAbs2 = 2 * dYAbs;
         var dXdYdiff2 = 2 * (dXAbs - dYAbs);
         var dYdXdiff2 = 2 * (dYAbs - dXAbs);
+        var err;
 
-        // Variables for the loops.
-        var x = startX;
-        var y = startY;
-        var e;
-
-        // Prüfen welcher Abstand größer
-        if(dXAbs >= dYAbs) {
-            // x führt an; Entscheidungsvariable setzen
-            e = dXAbs - dYAbs2;
-            while(x <= endX) {
-                // bis zum Ende von x durchführen, x erhöhen
+        if(dXAbs >= dYAbs){
+            err = dXAbs - dYAbs2;
+            while (x != endX){
                 x += dXSign;
-                if(e > 0) {
-                    // e dekrementieren < 0, und y bleibt gleich
-                    e -= dYAbs2;
+                if (err > 0){
+                    err -= dYAbs2;
                 } else {
-                    // y erhöhen
                     y += dYSign;
+                    err += dXdYdiff2;
                     addIntersection(x, y);
-                    // e inkrementieren, > 0
-                    e += dXdYdiff2;
                 }
-                // Punkt setzen
-                framebuffer.set(x,y,getZ(x,y),color);
+                framebuffer.set(x, y, getZ(x,y), color);
             }
         } else {
-            e = dYAbs - dXAbs2;
+            err = dYAbs - dXAbs2;
             while (y != endY){
                 y += dYSign;
-                addIntersection(x, y);
-                if(e > 0){
-                    e -= dXAbs2;
+                if(err > 0){
+                    err -= dXAbs2;
                 } else {
                     x += dXSign;
-                    e += dYdXdiff2;
+                    err += dYdXdiff2;
                 }
-                framebuffer.set(x,y,getZ(x,y),color);
+                framebuffer.set(x, y, getZ(x,y), color);
+                addIntersection(x, y);
             }
         }
-        return;
-    };
+    }
 
     /*
 	 * Fill a polygone into the frambuffer
