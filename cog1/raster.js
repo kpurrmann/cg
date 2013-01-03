@@ -168,7 +168,7 @@ define(["exports", "dojo", "shader", "framebuffer", "data", "glMatrix"], functio
                 return a-b;
             });
 
-            console.log(y + " :"  + scanlineIntersection[y]);
+            //            console.log(y + " :"  + scanlineIntersection[y]);
 
             for(var j = 0; j < scanlineIntersection[y].length; j++) {
                 drawLineBresenham(ctx, scanlineIntersection[y][j], y, scanlineIntersection[y][j+1], y, color, false);
@@ -221,21 +221,25 @@ define(["exports", "dojo", "shader", "framebuffer", "data", "glMatrix"], functio
         var n = vec3.create();
         var nLength = data.calculateNormalForPolygon(vertices, polygon, n);
 
+
         if(nLength == 0) {
             return;
         }
 
-    // BEGIN exercise z-Buffer:
+        // BEGIN exercise z-Buffer:
 
-    // Assign parameters for plane equation.
+        // Assign parameters for plane equation.
 
-    // Project first vertex (could be any) on normal.
-    // The result is the distance D of polygon plane to origin.
+        // Project first vertex (could be any) on normal.
+        // The result is the distance D of polygon plane to origin.
 
-    //console.log("Plane: A="+format.format(A)+" B="+format.format(B)+" C="+format.format(C)+" D="+format.format(D)+
-    //			"   nLength="+nLength+"    A/C="+A/C); // debug
-		
-		
+        A = n[0];
+        B = n[1];
+        C = n[2];
+        D = -vec3.dot(n, vertices[polygon[0]]);
+        AdivC = A / C;
+        
+
     // END exercise z-Buffer
     }
 
